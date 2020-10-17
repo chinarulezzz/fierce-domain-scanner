@@ -46,6 +46,7 @@ adkit
 admin
 admin2
 administracion
+administration
 administrador
 administrator
 administrators
@@ -1915,3 +1916,17 @@ mx08
 mx09
 mx11
 mx12
+ecos
+payrolladmino
+ex
+origin
+edge
+www-edge
+www-origin
+wwworigin
+wwwedge
+trade
+ams
+ams1
+ams2
+presale
