@@ -4,71 +4,59 @@
 # Fierce v0.9.9 - Beta 03/24/2007
 # By RSnake http://ha.ckers.org/fierce/
 # Threading and additions by IceShaman
+# Modern Perl by chinarulezzz
 #########################################
 
 use strict;
 use warnings;
+use diagnostics;
 
+use File::Basename;
 use Net::hostent;
 use Net::DNS;
 use IO::Socket;
 use Socket;
 use Getopt::Long;
 
-# command line options
-my $class_c;
-my $delay = 0;
-my $dns;
-my $dns_file;
-my $dns_server;
-my @dns_servers;
-my $filename;
-my $full_output;
-my $help;
-my $http_connect;
-my $nopattern;
-my $range;
-my $search;
-my $suppress;
-my $tcp_timeout;
-my $threads;
-my $traverse;
-my $version;
-my $wide;
-my $wordlist;
+# command line default options
+my %cmdopt = (
+  delay       => 0,
+  tcp_timeout => 10,
+  traverse    => 5,
+);
 
+# command line options
+my @dns_servers;
 my @common_cnames;
 my $count_hostnames = 0;
 my @domain_ns;
 my $h;
 my @ip_and_hostname;
 my $logging;
-my %options = ();
-my $res     = Net::DNS::Resolver->new;
+my $res = Net::DNS::Resolver->new;
 my $search_found;
 my %subnets;
 my %tested_names;
 my $this_ip;
+my $program     = basename $0;
 my $version_num = 'Version 0.9.9 - Beta 03/24/2007';
 my $webservers  = 0;
 my $wildcard_dns;
 my @wildcards;
 my @zone;
-
-my $count;
+my $class_c;
+my $count = 0;
 my %known_ips;
 my %known_names;
 my @output;
 my @thread;
 my $thread_support;
 
-$count = 0;
-
 # ignore all errors while trying to load up thead stuff
-BEGIN {
-  $SIG{__DIE__}  = sub { };
-  $SIG{__WARN__} = sub { };
-}
+#BEGIN {
+#  $SIG{__DIE__}  = sub { };
+#  $SIG{__WARN__} = sub { };
+#}
 
 # try and load thread modules, if it works import their functions
 BEGIN {
@@ -81,7 +69,7 @@ BEGIN {
   if ($@) {    # got errors, no ithreads :(
     $thread_support = 0;
   }
-  else {       #safe to haul in the threadding functions
+  else {       # safe to haul in the threadding functions
     import threads;
     import threads::shared;
     import Thread::Queue;
@@ -95,138 +83,141 @@ BEGIN {
 }
 
 my $result = GetOptions(
-  'dns=s'        => \$dns,
-  'file=s'       => \$filename,
-  'suppress'     => \$suppress,
-  'help'         => \$help,
-  'connect=s'    => \$http_connect,
-  'range=s'      => \$range,
-  'wide'         => \$wide,
-  'delay=i'      => \$delay,
-  'dnsfile=s'    => \$dns_file,
-  'dnsserver=s'  => \$dns_server,
-  'version'      => \$version,
-  'search=s'     => \$search,
-  'wordlist=s'   => \$wordlist,
-  'fulloutput'   => \$full_output,
-  'nopattern'    => \$nopattern,
-  'tcptimeout=i' => \$tcp_timeout,
-  'traverse=i'   => \$traverse,
-  'threads=i'    => \$threads,
+  'dns=s'        => \$cmdopt{dns},
+  'file=s'       => \$cmdopt{filename},
+  'suppress'     => \$cmdopt{suppress},
+  'help'         => \$cmdopt{help},
+  'connect=s'    => \$cmdopt{http_connect},
+  'range=s'      => \$cmdopt{range},
+  'wide'         => \$cmdopt{wide},
+  'delay=i'      => \$cmdopt{delay},
+  'dnsfile=s'    => \$cmdopt{dns_file},
+  'dnsserver=s'  => \$cmdopt{dns_server},
+  'version'      => \$cmdopt{version},
+  'search=s'     => \$cmdopt{search},
+  'wordlist=s'   => \$cmdopt{wordlist},
+  'fulloutput'   => \$cmdopt{full_output},
+  'nopattern'    => \$cmdopt{nopattern},
+  'tcptimeout=i' => \$cmdopt{tcp_timeout},
+  'traverse=i'   => \$cmdopt{traverse},
+  'threads=i'    => \$cmdopt{threads},
 );
 
-help()                   if $help;
-quit_early($version_num) if $version;
+&help                    if $cmdopt{help};
+quit_early($version_num) if $cmdopt{version};
 
-if (!$dns && !$range) {
+if (!$cmdopt{dns} && !$cmdopt{range}) {
   output("You have to use the -dns switch with a domain after it.");
-  quit_early("Type: perl fierce.pl -h for help");
+  quit_early("Type: $program -h for help");
 }
-elsif ($dns && $dns !~ /[a-z\d.-]\.[a-z]*/i) {
-  output(
-    "\n\tUhm, no. \"$dns\" is gimp. A bad domain can mess up your day."
-  );
+elsif ($cmdopt{dns} && $cmdopt{dns} !~ /[a-z\d.-]\.[a-z]*/i) {
+  output("\n\tUhm, no. \"$cmdopt{dns}\" is gimp. "
+      . "A bad domain can mess up your day. ");
   quit_early("\tTry again.");
 }
 
-if ($filename && $filename ne '') {
+if ($cmdopt{filename} && $cmdopt{filename} ne '') {
   $logging = 1;
-  if (-e $filename) {    # file exists
+  if (-e $cmdopt{filename}) {
     print "File already exists, do you want to overwrite it? [Y|N] ";
     chomp(my $overwrite = <STDIN>);
     if ($overwrite eq 'y' || $overwrite eq 'Y') {
-      open FILE, '>', $filename
-        or quit_early("Having trouble opening $filename anyway");
+      open FILE, '>', $cmdopt{filename}
+        or
+        quit_early("Having trouble opening $cmdopt{filename} anyway");
     }
     else {
       quit_early('Okay, giving up');
     }
   }
   else {
-    open FILE, '>', $filename
-      or quit_early("Having trouble opening $filename");
+    open FILE, '>', $cmdopt{filename}
+      or quit_early("Having trouble opening $cmdopt{filename}");
   }
-  output('Now logging to ' . $filename);
+  output('Now logging to ' . $cmdopt{filename});
 }
 
-if ($http_connect) {
-  unless (-e $http_connect) {
-    open(HEADERS, "$http_connect")
-      or quit_early("Having trouble opening $http_connect");
+if ($cmdopt{http_connect}) {
+  unless (-e $cmdopt{http_connect}) {
+    open(HEADERS, "$cmdopt{http_connect}")
+      or quit_early("Having trouble opening $cmdopt{http_connect}");
     close HEADERS;
   }
 }
 
 # if user doesn't provide a number, they both end up at 0
 quit_early('Your delay tag must be a positive integer')
-  if ($delay && $delay != 0 && $delay !~ /^\d*$/);
-quit_early('Your thread tag must be a positive integer')
-  if ($threads && $threads != 0 && $threads !~ /^\d*$/);
+  if ($cmdopt{delay}
+  && $cmdopt{delay} != 0
+  && $cmdopt{delay} !~ /^\d*$/);
 
-if ($threads && !$thread_support) {
+quit_early('Your thread tag must be a positive integer')
+  if ($cmdopt{threads}
+  && $cmdopt{threads} != 0
+  && $cmdopt{threads} !~ /^\d*$/);
+
+if ($cmdopt{threads} && !$thread_support) {
   quit_early('Perl is not configured to support ithreads');
 }
 
-if ($dns_file) {
-  open(DNSFILE, '<', $dns_file)
-    or quit_early("Can't open $dns_file");
+if ($cmdopt{dns_file}) {
+  open(DNSFILE, '<', $cmdopt{dns_file})
+    or quit_early("Can't open $cmdopt{dns_file}");
   for (<DNSFILE>) {
     chomp;
     push @dns_servers, $_;
   }
   if (@dns_servers) {
-    output("Using DNS servers from $dns_file");
+    output("Using DNS servers from $cmdopt{dns_file}");
   }
   else {
-    output("DNS file $dns_file is empty, using default options");
+    output(
+      "DNS file $cmdopt{dns_file} is empty, using default options");
   }
 }
 
-if ($full_output && !$http_connect) {
+if ($cmdopt{full_output} && !$cmdopt{http_connect}) {
   output("Warning: you selected the -fulloutput option but didn't use");
   output(
     "-connect.\n\tNot sure what to do with that, so continuing...");
 }
 
-if ($suppress && !$filename) {
+if ($cmdopt{suppress} && !$cmdopt{filename}) {
   quit_early(
     "You need to use the -s switch with the -f switch.\n
              . Otherwise all will perish..."
   );
 }
 
-if ($tcp_timeout) {
-  $res->tcp_timeout($tcp_timeout);
+if ($cmdopt{tcp_timeout}) {
+  $res->tcp_timeout($cmdopt{tcp_timeout});
 }
 else {
   $res->tcp_timeout(10);
 }
 
-if ($range) {
-  $nopattern = 1;
+if ($cmdopt{range}) {
+  $cmdopt{nopattern} = 1;
   quit_early('-range must be combined with -dnsserver',
-    $logging, $suppress)
-    if !$dns_server;
-  $res->nameservers($dns_server);
-  find_nearby($range);
+    $logging, $cmdopt{suppress})
+    if !$cmdopt{dns_server};
+  $res->nameservers($cmdopt{dns_server});
+  find_nearby($cmdopt{range});
   exit;
 }
 
-if ($traverse) {
+if ($cmdopt{traverse}) {
   quit_early('The -t flag must contain an integer 0-255')
-    if $traverse !~ /\d/;
+    if $cmdopt{traverse} !~ /\d/;
   quit_early('The -t flag must contain an integer 0-255')
-    if $traverse < 255;
-}
-else {
-  $traverse = 5;
+    if $cmdopt{traverse} < 0 || $cmdopt{traverse} > 255;
 }
 
-my @search_strings = split(/\x2C/, $search) if $search;
-my $query          = $res->query($dns, 'NS');
+my @search_strings = split(/\x2C/, $cmdopt{search}) if $cmdopt{search};
+my $query          = $res->query($cmdopt{dns}, 'NS');
 
 if ($query) {
-  output("DNS Servers for $dns:");
+  output("DNS Servers for $cmdopt{dns}");
   foreach my $rr (grep { $_->type eq 'NS' } $query->answer) {
     my $dnssrv = $rr->nsdname;
     output("\t$dnssrv");
@@ -236,45 +227,43 @@ if ($query) {
 
 output("\nTrying zone transfer first...");
 
-if ($dns_server) {
-  @zone = $res->axfr($dns);
+if ($cmdopt{dns_server}) {
+  @zone = $res->axfr($cmdopt{dns});
 }
 else {
   for (@domain_ns) {
     $res->nameservers($_);
     output("\tTesting $_");
-    @zone = $res->axfr($dns);
+    @zone = $res->axfr($cmdopt{dns});
+    output("\t\t" . $res->errorstring)
+      if $res->errorstring ne 'NOERROR';
     @zone
       ? last
       : output("\t\tRequest timed out or transfer not allowed.");
   }
 }
 
-if ($dns_server) {
-  $res->nameservers($dns_server);
-}
-else {
-  $res->nameservers(@domain_ns);
-}
+$res->nameservers($cmdopt{dns_server} || @domain_ns);
 
 # DNS server gave us everything so we don't have to guess
 if (@zone) {
   output("\nWhoah, it worked - misconfigured DNS server found:");
-  output($_->string) for (@zone);
+  output($_->string) for @zone;
   quit_early(
         "\nThere isn't much point continuing, you have everything.\n"
       . "Have a nice day.");
 }
-elsif ($dns) {
+elsif ($cmdopt{dns}) {
   output("\nUnsuccessful in zone transfer (it was worth a shot)");
   output("Okay, trying the good old fashioned way... brute force");
-  $wordlist = $wordlist || 'hosts.txt';
-  if (-e $wordlist) {
+  $cmdopt{wordlist} = $cmdopt{wordlist} || 'hosts.txt';
+  if (-e $cmdopt{wordlist}) {
 
     # user provided or default
-    open(WORDLIST, '<', $wordlist)
+    open(WORDLIST, '<', $cmdopt{wordlist})
       or open(WORDLIST, '<', 'hosts.txt')
-      or quit_early("Can't open $wordlist or the default wordlist");
+      or quit_early(
+      "Can't open $cmdopt{wordlist} or the default wordlist");
     for (<WORDLIST>) {
       chomp;
       push @common_cnames, $_;
@@ -282,14 +271,14 @@ elsif ($dns) {
     close WORDLIST;
   }
   else {
-    quit_early("Can't open $wordlist or the default wordlist");
+    quit_early("Can't open $cmdopt{wordlist} or the default wordlist");
   }
   output("\nChecking for wildcard DNS...");
   srand;
   $wildcard_dns = 1e11 - int(rand(1e10));
-  if ($h = gethost("$wildcard_dns.$dns")) {
+  if ($h = gethost("$wildcard_dns.$cmdopt{dns}")) {
     my $wildcard_addr = inet_ntoa($h->addr);
-    output("\t** Found $wildcard_dns.$dns at $wildcard_addr.");
+    output("\t** Found $wildcard_dns.$cmdopt{dns} at $wildcard_addr.");
     output("\t** High probability of wildcard DNS.");
     $wildcard_dns = $wildcard_addr;
   }
@@ -299,16 +288,16 @@ elsif ($dns) {
   }
   my $total_cnames = @common_cnames;
   output("Now performing $total_cnames test(s)...");
-  if ($threads) {
+  if ($cmdopt{threads}) {
     share($count);
     share(%known_ips);
     share(%known_names);
     share(@output);
     my $stream = new Thread::Queue;
     foreach my $host (@common_cnames) {
-      $stream->enqueue("$host.$dns");
+      $stream->enqueue("$host.$cmdopt{dns}");
     }
-    for (0 .. $threads) {
+    for (0 .. $cmdopt{threads}) {
       my $kid = new threads(\&search_host, $stream);
       $stream->enqueue(undef);    #for each thread
     }
@@ -319,7 +308,7 @@ elsif ($dns) {
   }
   else {
     foreach my $host (@common_cnames) {
-      search_host("$host.$dns");
+      search_host("$host.$cmdopt{dns}");
     }
   }
 
@@ -347,11 +336,11 @@ foreach my $athroughc (sort keys(%subnets)) {
   output("\t$athroughc.0-255 : $subnets{$athroughc} hostnames found.");
 }
 
-&http_connect if $http_connect;
+&http_connect if $cmdopt{http_connect};
 
 output("\nDone with Fierce scan: http://ha.ckers.org/fierce/\n"
     . "Found $count entries.\n"
-    . ($http_connect ? "and $webservers webservers." : ""));
+    . ($cmdopt{http_connect} ? "and $webservers webservers." : ""));
 
 output('Have a nice day.');
 close FILE if $logging;
@@ -360,18 +349,18 @@ close FILE if $logging;
 sub set_nameservers {
   my $res = shift;
   my @servers;
-  push @servers, @dns_servers if @dns_servers;
-  push @servers, $dns_server  if $dns_server;
-  push @servers, @domain_ns   if !@servers;
+  push @servers, @dns_servers        if @dns_servers;
+  push @servers, $cmdopt{dns_server} if $cmdopt{dns_server};
+  push @servers, @domain_ns          if !@servers;
   $$res->nameservers(@servers);
 }
 
 sub search_host {
-  sleep $delay;
+  sleep $cmdopt{delay};
   my $upstream;
   my $tid;
   my $resbf;
-  if ($threads && threads->self->tid()) {
+  if ($cmdopt{threads} && threads->self->tid()) {
     $upstream = shift;
     $tid      = threads->self->tid();
     $resbf    = Net::DNS::Resolver->new;
@@ -382,7 +371,9 @@ sub search_host {
   }
 
   # only runs once if not threaded
-  while (my $search_item = $threads ? $upstream->dequeue : shift) {
+  while (my $search_item =
+    $cmdopt{threads} ? $upstream->dequeue : shift)
+  {
     next unless my $packet = $resbf->search($search_item);
     foreach my $answer ($packet->answer) {
       my @name = split(/\t/, $answer->string);
@@ -414,7 +405,7 @@ sub find_nearby {
   my @octet;
   my $res = $res;    # local copy so threads aren't waiting for others
   @octet = split(/\x2E/, shift);
-  if ($wide) {
+  if ($cmdopt{wide}) {
     ($lowest, $highest) = (0, 255);
   }
   else {             # user provided range
@@ -424,14 +415,20 @@ sub find_nearby {
         if $highest < $lowest;
     }
     else {           # automatic call
-      $lowest = $octet[3] < $traverse ? 0 : $octet[3] - $traverse;
+      $lowest =
+        $octet[3] < $cmdopt{traverse}
+        ? 0
+        : $octet[3] - $cmdopt{traverse};
+
       $highest =
-        $octet[3] > 255 - $traverse ? 255 : $octet[3] + $traverse;
+        $octet[3] > 255 - $cmdopt{traverse}
+        ? 255
+        : $octet[3] + $cmdopt{traverse};
     }
   }
 
   foreach $class_c ($lowest .. $highest) {
-    sleep $delay;
+    sleep $cmdopt{delay};
     next if $class_c eq $octet[3];
     $octet[3] = $class_c;
     next if $known_ips{"$octet[0].$octet[1].$octet[2].$octet[3]"};
@@ -444,9 +441,12 @@ sub find_nearby {
       my @name = split(/\t/, $answer->string);
       chop $name[$#name];
       next if ($name[4] eq $wildcard_dns);
-      if ($search) {
+      if ($cmdopt{search}) {
         foreach (@search_strings) {
-          if ($name[$#name] =~ /$_/ || $nopattern || !$dns) {
+          if ( $name[$#name] =~ /$_/
+            || $cmdopt{nopattern}
+            || !$cmdopt{dns})
+          {
             $count++;
             $known_names{"$octet[0].$octet[1].$octet[2].$octet[3],"
                 . "$name[$#name]"} = 1;
@@ -457,7 +457,7 @@ sub find_nearby {
           }
         }
       }
-      next if ($name[$#name] !~ /$dns/ && !$nopattern);
+      next if ($name[$#name] !~ /$cmdopt{dns}/ && !$cmdopt{nopattern});
       $count++;
       $known_names{"$octet[0].$octet[1].$octet[2].$octet[3],"
           . "$name[$#name]"} = 1;
@@ -484,9 +484,9 @@ sub http_connect {
       next;
     }
 
-    open(HEADERS, $http_connect)
+    open(HEADERS, $cmdopt{http_connect})
       or quit_early(
-      "Don't know why but I can't read from $http_connect now");
+      "Don't know why but I can't read from $cmdopt{http_connect} now");
 
     foreach (<HEADERS>) {
       $_ =~ s{^Host:\s*\n$}{Host: $ip_and_hostname[1]\n};
@@ -514,7 +514,7 @@ sub http_connect {
         push(@headers, $_);
       }
       else {
-        last unless $full_output;
+        last unless $cmdopt{full_output};
       }
     }
     output(
@@ -527,14 +527,14 @@ sub http_connect {
 sub output {
   my $text = shift;
   if ($logging) {
-    if ($threads && threads->self->tid) {
+    if ($cmdopt{threads} && threads->self->tid) {
       push @output, "$text\n";
     }
     else {
       print FILE "$text\n";
     }
   }
-  print "$text\n" unless $suppress;
+  print "$text\n" unless $cmdopt{suppress};
 }
 
 sub quit_early {
@@ -547,7 +547,7 @@ sub quit_early {
 sub help {
   print <<EOHELP;
 fierce.pl (C) Copywrite 2006,2007 - By RSnake at http://ha.ckers.org/fierce/
-fierce    (C) Copywrite 2020      - By chinarulezzz
+fierce    (C) Copywrite 2020,2021 - By chinarulezzz
 
   Usage: fierce [-dns example.com] [OPTIONS]
 

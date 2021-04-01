@@ -30,7 +30,7 @@ internal address space. That's especially useful in targeted malware.
         Inside the file specified the text "Host:\n" will be replaced
         by the host specified. Usage:
 
-    perl fierce.pl -dns example.com -connect headers.txt
+    fierce -dns example.com -connect headers.txt
 
     -delay      The number of seconds to wait between lookups.
     -dns        The domain you would like scanned.
@@ -53,7 +53,7 @@ internal address space. That's especially useful in targeted malware.
         -dnsserver).  Note, that this does not support a pattern
         and will simply output anything it finds.  Usage:
 
-    perl fierce.pl -range 111.222.333.0-255 -dnsserver ns1.example.co
+    fierce -range 111.222.333.0-255 -dnsserver ns1.example.co
 
     -search     Search list.  When fierce attempts to traverse up and
         down ipspace it may encounter other servers within other
@@ -62,7 +62,7 @@ internal address space. That's especially useful in targeted malware.
         This is especially useful if the corporate servers are named
         different from the public facing website.  Usage:
 
-    perl fierce.pl -dns examplecompany.com -search corpcompany,blahcompany
+    fierce -dns examplecompany.com -search corpcompany,blahcompany
 
         Note that using search could also greatly expand the number of
         hosts found, as it will continue to traverse once it locates
@@ -83,7 +83,7 @@ internal address space. That's especially useful in targeted malware.
         but can uncover a lot more information.
     -wordlist   Use a seperate wordlist (one word per line).  Usage:
 
-    perl fierce.pl -dns examplecompany.com -wordlist dictionary.txt
+    fierce -dns examplecompany.com -wordlist dictionary.txt
 
 ## fierce Usage Example
 
